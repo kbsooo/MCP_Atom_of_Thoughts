@@ -15,14 +15,30 @@ interface AtomData {
   confidence: number;
   created: number;
   isVerified: boolean;
+  depth?: number;
+}
+
+interface DecompositionState {
+  originalAtomId: string;
+  subAtoms: string[];
+  isCompleted: boolean;
 }
 
 class AtomOfThoughtsServer {
-  private atoms: Record<string, AtomData> = {};
-  private atomOrder: string[] = [];
+  protected atoms: Record<string, AtomData> = {};
+  protected atomOrder: string[] = [];
   private verifiedConclusions: string[] = [];
+  private decompositionStates: Record<string, DecompositionState> = {};
+  public maxDepth: number = 5; // Default maximum depth
+  private currentDecompositionId: string | null = null;
 
-  private validateAtomData(input: unknown): AtomData {
+  constructor(maxDepth?: number) {
+    if (maxDepth !== undefined && maxDepth > 0) {
+      this.maxDepth = maxDepth;
+    }
+  }
+
+  protected validateAtomData(input: unknown): AtomData {
     const data = input as Record<string, unknown>;
 
     if (!data.atomId || typeof data.atomId !== 'string') {
@@ -50,11 +66,12 @@ class AtomOfThoughtsServer {
       confidence: data.confidence as number,
       created: data.created as number || Date.now(),
       isVerified: data.isVerified as boolean || false,
+      depth: data.depth as number | undefined,
     };
   }
 
-  private formatAtom(atomData: AtomData): string {
-    const { atomId, content, atomType, dependencies, confidence, isVerified } = atomData;
+  protected formatAtom(atomData: AtomData): string {
+    const { atomId, content, atomType, dependencies, confidence, isVerified, depth } = atomData;
 
     let typeColor;
     let typeSymbol;
@@ -82,9 +99,10 @@ class AtomOfThoughtsServer {
         break;
     }
 
-    const header = typeColor(`${typeSymbol} ${atomType.toUpperCase()}: ${atomId} ${isVerified ? '(✓ 검증됨)' : ''}`);
+    const depthInfo = depth !== undefined ? ` [Depth: ${depth}/${this.maxDepth}]` : '';
+    const header = typeColor(`${typeSymbol} ${atomType.toUpperCase()}: ${atomId}${depthInfo} ${isVerified ? '(✓ Verified)' : ''}`);
     const confidenceBar = this.generateConfidenceBar(confidence);
-    const dependenciesText = dependencies.length > 0 ? `의존성: ${dependencies.join(', ')}` : '의존성 없음';
+    const dependenciesText = dependencies.length > 0 ? `Dependencies: ${dependencies.join(', ')}` : 'No dependencies';
     
     const border = '─'.repeat(Math.max(header.length, content.length, dependenciesText.length) + 4);
 
@@ -103,7 +121,7 @@ class AtomOfThoughtsServer {
     const filledBars = Math.round(confidence * barLength);
     const emptyBars = barLength - filledBars;
     
-    return `신뢰도: [${chalk.green('█'.repeat(filledBars))}${chalk.gray('░'.repeat(emptyBars))}] ${(confidence * 100).toFixed(0)}%`;
+    return `Confidence: [${chalk.green('█'.repeat(filledBars))}${chalk.gray('░'.repeat(emptyBars))}] ${(confidence * 100).toFixed(0)}%`;
   }
 
   private validateDependencies(dependencies: string[]): boolean {
@@ -116,7 +134,7 @@ class AtomOfThoughtsServer {
     }
   }
 
-  private verifyAtom(atomId: string, isVerified: boolean) {
+  protected verifyAtom(atomId: string, isVerified: boolean) {
     if (this.atoms[atomId]) {
       this.atoms[atomId].isVerified = isVerified;
       
@@ -125,7 +143,210 @@ class AtomOfThoughtsServer {
       } else if (!isVerified && this.atoms[atomId].atomType === 'conclusion') {
         this.verifiedConclusions = this.verifiedConclusions.filter(id => id !== atomId);
       }
+
+      // Trigger contraction if a verification atom verifies a hypothesis
+      if (isVerified && this.atoms[atomId].atomType === 'verification') {
+        const verifiedHypothesisIds = this.atoms[atomId].dependencies.filter(
+          depId => this.atoms[depId] && this.atoms[depId].atomType === 'hypothesis'
+        );
+        
+        if (verifiedHypothesisIds.length > 0) {
+          // Mark the hypotheses as verified
+          verifiedHypothesisIds.forEach(hypId => {
+            this.atoms[hypId].isVerified = true;
+          });
+          
+          // Check if this should trigger a contraction
+          this.checkForContraction(verifiedHypothesisIds);
+        }
+      }
     }
+  }
+
+  // New method for decomposition
+  public startDecomposition(atomId: string): string {
+    if (!this.atoms[atomId]) {
+      throw new Error(`Atom with ID ${atomId} not found`);
+    }
+
+    // Generate a unique ID for this decomposition
+    const decompositionId = `decomp_${Date.now()}`;
+    
+    this.decompositionStates[decompositionId] = {
+      originalAtomId: atomId,
+      subAtoms: [],
+      isCompleted: false
+    };
+
+    this.currentDecompositionId = decompositionId;
+    
+    console.error(chalk.cyan(`🔍 Starting decomposition of atom ${atomId} (ID: ${decompositionId})`));
+    
+    return decompositionId;
+  }
+
+  // Add a sub-atom to an ongoing decomposition
+  public addToDecomposition(decompositionId: string, atomId: string): boolean {
+    if (!this.decompositionStates[decompositionId]) {
+      throw new Error(`Decomposition with ID ${decompositionId} not found`);
+    }
+    
+    if (this.decompositionStates[decompositionId].isCompleted) {
+      throw new Error(`Decomposition ${decompositionId} is already completed`);
+    }
+    
+    if (!this.atoms[atomId]) {
+      throw new Error(`Atom with ID ${atomId} not found`);
+    }
+    
+    // Calculate depth for the new atom
+    const parentDepth = this.atoms[this.decompositionStates[decompositionId].originalAtomId].depth || 0;
+    this.atoms[atomId].depth = parentDepth + 1;
+    
+    // Check if we've hit the maximum depth
+    if (this.atoms[atomId].depth >= this.maxDepth) {
+      console.error(chalk.yellow(`⚠️ Maximum depth ${this.maxDepth} reached with atom ${atomId}`));
+    }
+    
+    this.decompositionStates[decompositionId].subAtoms.push(atomId);
+    
+    console.error(chalk.cyan(`➕ Added atom ${atomId} to decomposition ${decompositionId}`));
+    
+    return true;
+  }
+
+  // Complete a decomposition
+  public completeDecomposition(decompositionId: string): boolean {
+    if (!this.decompositionStates[decompositionId]) {
+      throw new Error(`Decomposition with ID ${decompositionId} not found`);
+    }
+    
+    this.decompositionStates[decompositionId].isCompleted = true;
+    
+    if (this.currentDecompositionId === decompositionId) {
+      this.currentDecompositionId = null;
+    }
+    
+    console.error(chalk.green(`✅ Completed decomposition ${decompositionId}`));
+    
+    return true;
+  }
+
+  // Contraction mechanism
+  private checkForContraction(verifiedAtomIds: string[]): void {
+    // Find decomposition states that have these atoms as sub-atoms
+    for (const [decompId, state] of Object.entries(this.decompositionStates)) {
+      if (state.isCompleted && 
+          verifiedAtomIds.some(id => state.subAtoms.includes(id)) && 
+          this.areAllSubAtomsVerified(state.subAtoms)) {
+        
+        // All sub-atoms are verified, perform contraction
+        this.performContraction(decompId);
+      }
+    }
+  }
+
+  private areAllSubAtomsVerified(atomIds: string[]): boolean {
+    return atomIds.every(id => this.atoms[id] && this.atoms[id].isVerified);
+  }
+
+  private performContraction(decompositionId: string): void {
+    const state = this.decompositionStates[decompositionId];
+    if (!state) return;
+    
+    const originalAtom = this.atoms[state.originalAtomId];
+    if (!originalAtom) return;
+    
+    // Calculate combined confidence from sub-atoms
+    const subAtomConfidences = state.subAtoms.map(id => this.atoms[id]?.confidence || 0);
+    const averageConfidence = subAtomConfidences.reduce((sum, conf) => sum + conf, 0) / subAtomConfidences.length;
+    
+    // Mark the original atom as verified with the calculated confidence
+    originalAtom.confidence = averageConfidence;
+    originalAtom.isVerified = true;
+    
+    console.error(chalk.magenta(`🔄 Contracted decomposition ${decompositionId} back to atom ${state.originalAtomId} with confidence ${(averageConfidence * 100).toFixed(0)}%`));
+    
+    // If the contracted atom is a hypothesis and is verified with high confidence, 
+    // we might want to automatically create a conclusion based on it
+    if (originalAtom.atomType === 'hypothesis' && originalAtom.confidence >= 0.8) {
+      this.suggestConclusion(originalAtom);
+    }
+  }
+
+  protected suggestConclusion(verifiedHypothesis: AtomData): string {
+    // Create a new conclusion atom based on the verified hypothesis
+    const conclusionId = `C${Object.keys(this.atoms).filter(id => id.startsWith('C')).length + 1}`;
+    
+    const conclusionAtom: AtomData = {
+      atomId: conclusionId,
+      content: `Based on verified hypothesis: ${verifiedHypothesis.content}`,
+      atomType: 'conclusion',
+      dependencies: [verifiedHypothesis.atomId],
+      confidence: verifiedHypothesis.confidence * 0.9, // Slightly lower confidence for the derived conclusion
+      created: Date.now(),
+      isVerified: false,
+      depth: verifiedHypothesis.depth, // Same depth as the hypothesis
+    };
+    
+    this.atoms[conclusionId] = conclusionAtom;
+    this.atomOrder.push(conclusionId);
+    
+    console.error(chalk.green(`🏆 Suggested conclusion ${conclusionId} based on verified hypothesis ${verifiedHypothesis.atomId}`));
+    
+    return conclusionId;
+  }
+
+  // Check if we should automatically terminate based on depth or verified conclusions
+  protected shouldTerminate(): boolean {
+    // Check if we have any atoms at max depth
+    const atMaxDepth = Object.values(this.atoms).some(atom => atom.depth !== undefined && atom.depth >= this.maxDepth);
+    
+    // Check if we have any verified conclusions with high confidence
+    const hasStrongConclusion = this.verifiedConclusions.some(id => this.atoms[id] && this.atoms[id].confidence >= 0.9);
+    
+    return atMaxDepth || hasStrongConclusion;
+  }
+
+  // Get the termination status and reason
+  public getTerminationStatus(): { shouldTerminate: boolean; reason: string } {
+    const atMaxDepth = Object.values(this.atoms).some(atom => atom.depth !== undefined && atom.depth >= this.maxDepth);
+    const hasStrongConclusion = this.verifiedConclusions.some(id => this.atoms[id] && this.atoms[id].confidence >= 0.9);
+    
+    if (atMaxDepth && hasStrongConclusion) {
+      return { 
+        shouldTerminate: true, 
+        reason: 'Maximum depth reached and strong conclusion found' 
+      };
+    } else if (atMaxDepth) {
+      return { 
+        shouldTerminate: true, 
+        reason: 'Maximum depth reached' 
+      };
+    } else if (hasStrongConclusion) {
+      return { 
+        shouldTerminate: true, 
+        reason: 'Strong conclusion found' 
+      };
+    } else {
+      return { 
+        shouldTerminate: false, 
+        reason: 'Continue reasoning' 
+      };
+    }
+  }
+
+  // Get the best conclusion if we should terminate
+  public getBestConclusion(): AtomData | null {
+    if (this.verifiedConclusions.length === 0) return null;
+    
+    // Sort by confidence and return the highest
+    const sortedConclusions = [...this.verifiedConclusions]
+      .map(id => this.atoms[id])
+      .filter(atom => atom !== undefined)
+      .sort((a, b) => b.confidence - a.confidence);
+    
+    return sortedConclusions[0] || null;
   }
 
   public processAtom(input: unknown): { content: Array<{ type: string; text: string }>; isError?: boolean } {
@@ -137,6 +358,22 @@ class AtomOfThoughtsServer {
         throw new Error('Invalid dependencies: one or more dependency atoms do not exist');
       }
 
+      // Set depth based on dependencies if not specified
+      if (validatedInput.depth === undefined) {
+        const depthsOfDependencies = validatedInput.dependencies
+          .map(depId => (this.atoms[depId]?.depth !== undefined ? this.atoms[depId].depth! : 0))
+          .filter(depth => depth !== undefined);
+        
+        validatedInput.depth = depthsOfDependencies.length > 0
+          ? Math.max(...depthsOfDependencies) + 1
+          : 0;
+      }
+
+      // Check if this would exceed max depth
+      if (validatedInput.depth > this.maxDepth) {
+        console.error(chalk.yellow(`⚠️ Warning: Atom ${validatedInput.atomId} exceeds maximum depth ${this.maxDepth}`));
+      }
+
       // Store the atom
       this.atoms[validatedInput.atomId] = validatedInput;
       
@@ -145,10 +382,40 @@ class AtomOfThoughtsServer {
         this.atomOrder.push(validatedInput.atomId);
       }
 
+      // Automatically add to current decomposition if there is one
+      if (this.currentDecompositionId) {
+        try {
+          this.addToDecomposition(this.currentDecompositionId, validatedInput.atomId);
+        } catch (e: any) {
+          console.error(`Could not add atom to current decomposition: ${e.message}`);
+        }
+      }
+
       // Format and display the atom
       const formattedAtom = this.formatAtom(validatedInput);
       console.error(formattedAtom);
 
+      // If it's a verification atom that verifies something, process it
+      if (validatedInput.atomType === 'verification' && validatedInput.isVerified) {
+        validatedInput.dependencies.forEach(depId => {
+          if (this.atoms[depId]) {
+            this.verifyAtom(depId, true);
+          }
+        });
+      }
+
+      // Check for termination
+      const terminationStatus = this.getTerminationStatus();
+      let bestConclusion = null;
+      
+      if (terminationStatus.shouldTerminate) {
+        bestConclusion = this.getBestConclusion();
+        console.error(chalk.red(`🛑 Termination condition met: ${terminationStatus.reason}`));
+        if (bestConclusion) {
+          console.error(chalk.green(`🏆 Best conclusion: ${bestConclusion.atomId} - ${bestConclusion.content}`));
+        }
+      }
+      
       // Get atoms required for the response
       const dependentAtoms = this.getDependentAtoms(validatedInput.atomId);
       const conflictingAtoms = this.findConflictingAtoms(validatedInput);
@@ -161,10 +428,18 @@ class AtomOfThoughtsServer {
             atomType: validatedInput.atomType,
             isVerified: validatedInput.isVerified,
             confidence: validatedInput.confidence,
+            depth: validatedInput.depth,
             atomsCount: Object.keys(this.atoms).length,
             dependentAtoms,
             conflictingAtoms,
-            verifiedConclusions: this.verifiedConclusions
+            verifiedConclusions: this.verifiedConclusions,
+            terminationStatus,
+            bestConclusion: bestConclusion ? {
+              atomId: bestConclusion.atomId,
+              content: bestConclusion.content,
+              confidence: bestConclusion.confidence
+            } : null,
+            currentDecomposition: this.currentDecompositionId
           }, null, 2)
         }]
       };
@@ -207,80 +482,277 @@ class AtomOfThoughtsServer {
   }
 }
 
-const ATOM_OF_THOUGHTS_TOOL: Tool = {
-  name: "atomofthoughts",
-  description: `Atom of Thoughts(AoT)는 복잡한 문제를 독립적이고 재사용 가능한 원자 단위의 사고로 분해하여 문제를 해결하는 도구입니다.
-이 도구는 전통적인 순차적 사고 방식과 달리, 사고의 기본 단위인 '원자'들이 서로 의존성을 갖고 구성되어 더 강력한 문제 해결을 가능하게 합니다.
+// Creating a lightweight version of the AtomOfThoughtsServer
+class AtomOfThoughtsLightServer extends AtomOfThoughtsServer {
+  constructor() {
+    // Lower max depth for faster processing
+    super(3);
+  }
 
-사용해야 하는 경우:
-- 복잡한 추론이 필요한 문제 해결
-- 여러 관점에서 검증이 필요한 가설 생성
-- 정확도가 중요한 문제에서 신뢰도 높은 결론 도출
-- 논리적 오류를 최소화해야 하는 작업
-- 여러 단계의 검증이 필요한 의사결정
+  // Override to simplify the verification process
+  public processAtom(input: unknown): { content: Array<{ type: string; text: string }>; isError?: boolean } {
+    try {
+      const validatedInput = this.validateAtomData(input);
+      
+      // Store the atom
+      this.atoms[validatedInput.atomId] = validatedInput;
+      
+      // Add to order if it's new
+      if (!this.atomOrder.includes(validatedInput.atomId)) {
+        this.atomOrder.push(validatedInput.atomId);
+      }
 
-원자 유형:
-- premise(전제): 문제 해결을 위한 기본 가정이나 주어진 정보
-- reasoning(추론): 다른 원자들을 기반으로 한 논리적 추론 과정
-- hypothesis(가설): 가능한 해결책이나 중간 결론에 대한 제안
-- verification(검증): 다른 원자(특히 가설)의 유효성을 평가하는 과정
-- conclusion(결론): 검증된 가설이나 최종 문제 해결책
+      // Format and display the atom with simplified output
+      const formattedAtom = this.formatAtom(validatedInput);
+      console.error(formattedAtom);
 
-매개변수 설명:
-- atomId: 원자의 고유 식별자 (예: 'A1', 'H2' 등)
-- content: 원자의 실제 내용
-- atomType: 원자의 유형 (premise, reasoning, hypothesis, verification, conclusion 중 하나)
-- dependencies: 이 원자가 의존하는 다른 원자들의 ID 목록
-- confidence: 이 원자의 신뢰도 (0~1 사이의 값)
-- isVerified: 이 원자가 검증되었는지 여부
+      // Quick verification - if verification atom, immediately verify dependencies
+      if (validatedInput.atomType === 'verification' && validatedInput.isVerified) {
+        validatedInput.dependencies.forEach(depId => {
+          if (this.atoms[depId]) {
+            this.verifyAtom(depId, true);
+          }
+        });
+      }
 
-사용 방법:
-1. 문제를 이해하고 필요한 전제(premise) 원자들을 정의
-2. 전제를 바탕으로 추론(reasoning) 원자 생성
-3. 추론을 바탕으로 가설(hypothesis) 원자 생성
-4. 가설을 검증(verification)하는 원자 생성
-5. 검증된 가설을 바탕으로 결론(conclusion) 원자 도출
-6. 필요시 이전 원자들을 수정하거나 새 원자 추가
-7. 높은 신뢰도의 결론 원자를 최종 답변으로 제시`,
+      // Faster conclusion suggestion - if hypothesis with high confidence, suggest conclusion immediately
+      if (validatedInput.atomType === 'hypothesis' && validatedInput.confidence >= 0.8) {
+        this.suggestConclusion(validatedInput);
+      }
+
+      // Simplified termination check
+      const shouldTerminate = this.shouldTerminate();
+      const bestConclusion = shouldTerminate ? this.getBestConclusion() : null;
+      
+      // Basic response with less processing
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            atomId: validatedInput.atomId,
+            atomType: validatedInput.atomType,
+            isVerified: validatedInput.isVerified,
+            confidence: validatedInput.confidence,
+            atomsCount: Object.keys(this.atoms).length,
+            bestConclusion: bestConclusion ? {
+              atomId: bestConclusion.atomId,
+              content: bestConclusion.content,
+              confidence: bestConclusion.confidence
+            } : null
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            error: error instanceof Error ? error.message : String(error),
+            status: 'failed'
+          }, null, 2)
+        }],
+        isError: true
+      };
+    }
+  }
+}
+
+const AOT_TOOL: Tool = {
+  name: "AoT",
+  description: `Atom of Thoughts (AoT) is a tool for solving complex problems by decomposing them into independent, reusable atomic units of thought.
+Unlike traditional sequential thinking, this tool enables more powerful problem solving by allowing atomic units of thought to form dependencies with each other.
+
+When to use:
+- Solving problems requiring complex reasoning
+- Generating hypotheses that need verification from multiple perspectives
+- Deriving high-confidence conclusions in scenarios where accuracy is crucial
+- Minimizing logical errors in critical tasks
+- Decision-making requiring multiple verification steps
+
+Atom types:
+- premise: Basic assumptions or given information for problem solving
+- reasoning: Logical reasoning process based on other atoms
+- hypothesis: Proposed solutions or intermediate conclusions
+- verification: Process to evaluate the validity of other atoms (especially hypotheses)
+- conclusion: Verified hypotheses or final problem solutions
+
+Parameter descriptions:
+- atomId: Unique identifier for the atom (e.g., 'A1', 'H2')
+- content: Actual content of the atom
+- atomType: Type of atom (one of: premise, reasoning, hypothesis, verification, conclusion)
+- dependencies: List of IDs of other atoms this atom depends on
+- confidence: Confidence level of this atom (value between 0-1)
+- isVerified: Whether this atom has been verified
+- depth: Depth level of this atom (in the decomposition-contraction process)
+
+Additional features:
+1. Decomposition-Contraction mechanism: 
+   - Decompose atoms into smaller sub-atoms and contract back after verification
+   - startDecomposition(atomId): Start atom decomposition
+   - addToDecomposition(decompositionId, atomId): Add sub-atom to decomposition
+   - completeDecomposition(decompositionId): Complete decomposition process
+
+2. Automatic termination mechanism:
+   - Automatically terminate when reaching maximum depth or finding high-confidence conclusion
+   - getTerminationStatus(): Return termination status and reason
+   - getBestConclusion(): Return highest confidence conclusion
+
+Usage method:
+1. Understand the problem and define necessary premise atoms
+2. Create reasoning atoms based on premises
+3. Create hypothesis atoms based on reasoning
+4. Create verification atoms to verify hypotheses
+5. Derive conclusion atoms based on verified hypotheses
+6. Use atom decomposition to explore deeper when necessary
+7. Present the high-confidence conclusion atom as the final answer`,
   inputSchema: {
     type: "object",
     properties: {
       atomId: {
         type: "string",
-        description: "원자의 고유 식별자"
+        description: "Unique identifier for the atom"
       },
       content: {
         type: "string",
-        description: "원자의 실제 내용"
+        description: "Actual content of the atom"
       },
       atomType: {
         type: "string",
         enum: ["premise", "reasoning", "hypothesis", "verification", "conclusion"],
-        description: "원자의 유형"
+        description: "Type of atom"
       },
       dependencies: {
         type: "array",
         items: {
           type: "string"
         },
-        description: "이 원자가 의존하는 다른 원자들의 ID 목록"
+        description: "List of IDs of other atoms this atom depends on"
       },
       confidence: {
         type: "number",
         minimum: 0,
         maximum: 1,
-        description: "원자의 신뢰도 (0~1 사이)"
+        description: "Confidence level of this atom (value between 0-1)"
       },
       isVerified: {
         type: "boolean",
-        description: "원자가 검증되었는지 여부"
+        description: "Whether this atom has been verified"
+      },
+      depth: {
+        type: "number",
+        description: "Depth level of this atom in the decomposition-contraction mechanism"
       }
     },
     required: ["atomId", "content", "atomType", "dependencies", "confidence"]
   }
 };
 
-// sequentialthinking.ts와 같은 패턴으로 서버 인스턴스 생성
+const AOT_LIGHT_TOOL: Tool = {
+  name: "AoT-light",
+  description: `A lightweight version of Atom of Thoughts (AoT) designed for faster processing and quicker results.
+This streamlined version sacrifices some depth of analysis for speed, making it ideal for time-sensitive reasoning tasks.
+
+When to use:
+- Quick brainstorming sessions requiring atomic thought organization
+- Time-sensitive problem solving where speed is prioritized over exhaustive analysis
+- Simpler reasoning tasks that don't require deep decomposition
+- Initial exploration before using the full AoT for deeper analysis
+- Learning or demonstration purposes where response time is important
+
+Key differences from full AoT:
+- Lower maximum depth (3 instead of 5) for faster processing
+- Simplified verification process
+- Immediate conclusion suggestion for high-confidence hypotheses
+- Reduced computational overhead and response payload
+- Optimized for speed rather than exhaustive analysis
+
+Atom types and parameters are the same as the full AoT tool.`,
+  inputSchema: {
+    type: "object",
+    properties: {
+      atomId: {
+        type: "string",
+        description: "Unique identifier for the atom"
+      },
+      content: {
+        type: "string",
+        description: "Actual content of the atom"
+      },
+      atomType: {
+        type: "string",
+        enum: ["premise", "reasoning", "hypothesis", "verification", "conclusion"],
+        description: "Type of atom"
+      },
+      dependencies: {
+        type: "array",
+        items: {
+          type: "string"
+        },
+        description: "List of IDs of other atoms this atom depends on"
+      },
+      confidence: {
+        type: "number",
+        minimum: 0,
+        maximum: 1,
+        description: "Confidence level of this atom (value between 0-1)"
+      },
+      isVerified: {
+        type: "boolean",
+        description: "Whether this atom has been verified"
+      },
+      depth: {
+        type: "number",
+        description: "Depth level of this atom (optional, defaults to 0)"
+      }
+    },
+    required: ["atomId", "content", "atomType", "dependencies", "confidence"]
+  }
+};
+
+// Command handler to expose decomposition-contraction functionality
+const ATOM_COMMANDS_TOOL: Tool = {
+  name: "atomcommands",
+  description: `A command tool to control the decomposition-contraction mechanism and automatic termination of Atom of Thoughts.
+  
+Use this tool to access advanced features of AoT:
+
+1. Decomposition (decompose): Decompose a specified atom into smaller sub-atoms
+2. Complete decomposition (complete_decomposition): Complete an ongoing decomposition process
+3. Check termination status (termination_status): Check the termination status of the current AoT process
+4. Get best conclusion (best_conclusion): Get the verified conclusion with the highest confidence
+5. Change settings (set_max_depth): Change the maximum depth limit
+
+Command descriptions:
+- command: Command to execute (decompose, complete_decomposition, termination_status, best_conclusion, set_max_depth)
+- atomId: Atom ID to use with the command (only required for decompose command)
+- decompositionId: ID of the decomposition process (only required for complete_decomposition command)
+- maxDepth: Maximum depth value to set (only required for set_max_depth command)`,
+  inputSchema: {
+    type: "object",
+    properties: {
+      command: {
+        type: "string",
+        enum: ["decompose", "complete_decomposition", "termination_status", "best_conclusion", "set_max_depth"],
+        description: "Command to execute"
+      },
+      atomId: {
+        type: "string",
+        description: "Atom ID to use with the command"
+      },
+      decompositionId: {
+        type: "string",
+        description: "ID of the decomposition process to complete"
+      },
+      maxDepth: {
+        type: "number",
+        description: "Maximum depth value to set"
+      }
+    },
+    required: ["command"]
+  }
+};
+
+// Server setup
 const server = new Server(
   {
     name: "atom-of-thoughts",
@@ -294,20 +766,112 @@ const server = new Server(
 );
 
 const atomServer = new AtomOfThoughtsServer();
+const atomLightServer = new AtomOfThoughtsLightServer();
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [ATOM_OF_THOUGHTS_TOOL],
+  tools: [AOT_TOOL, AOT_LIGHT_TOOL, ATOM_COMMANDS_TOOL],
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  if (request.params.name === "atomofthoughts") {
+  if (request.params.name === "AoT") {
     return atomServer.processAtom(request.params.arguments);
+  } else if (request.params.name === "AoT-light") {
+    return atomLightServer.processAtom(request.params.arguments);
+  } else if (request.params.name === "atomcommands") {
+    try {
+      const params = request.params.arguments as Record<string, unknown>;
+      const command = params.command as string;
+      
+      let result: any = { status: 'error', message: 'Unknown command' };
+      
+      switch (command) {
+        case 'decompose':
+          const atomId = params.atomId as string;
+          if (!atomId) throw new Error('atomId is required for decompose command');
+          
+          const decompositionId = atomServer.startDecomposition(atomId);
+          result = { 
+            status: 'success', 
+            command: 'decompose',
+            decompositionId,
+            message: `Started decomposition of atom ${atomId}`
+          };
+          break;
+          
+        case 'complete_decomposition':
+          const decompId = params.decompositionId as string;
+          if (!decompId) throw new Error('decompositionId is required for complete_decomposition command');
+          
+          const completed = atomServer.completeDecomposition(decompId);
+          result = { 
+            status: 'success', 
+            command: 'complete_decomposition',
+            completed,
+            message: `Completed decomposition ${decompId}`
+          };
+          break;
+          
+        case 'termination_status':
+          const status = atomServer.getTerminationStatus();
+          result = { 
+            status: 'success', 
+            command: 'termination_status',
+            ...status
+          };
+          break;
+          
+        case 'best_conclusion':
+          const bestConclusion = atomServer.getBestConclusion();
+          result = { 
+            status: 'success', 
+            command: 'best_conclusion',
+            conclusion: bestConclusion ? {
+              atomId: bestConclusion.atomId,
+              content: bestConclusion.content,
+              confidence: bestConclusion.confidence
+            } : null
+          };
+          break;
+          
+        case 'set_max_depth':
+          const maxDepth = params.maxDepth as number;
+          if (typeof maxDepth !== 'number' || maxDepth <= 0) 
+            throw new Error('maxDepth must be a positive number');
+          
+          atomServer.maxDepth = maxDepth;
+          result = { 
+            status: 'success', 
+            command: 'set_max_depth',
+            maxDepth,
+            message: `Maximum depth set to ${maxDepth}`
+          };
+          break;
+      }
+      
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(result, null, 2)
+        }]
+      };
+    } catch (error) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            status: 'error',
+            error: error instanceof Error ? error.message : String(error)
+          }, null, 2)
+        }],
+        isError: true
+      };
+    }
   }
 
   return {
     content: [{
       type: "text",
-      text: `알 수 없는 도구: ${request.params.name}`
+      text: `Unknown tool: ${request.params.name}`
     }],
     isError: true
   };
