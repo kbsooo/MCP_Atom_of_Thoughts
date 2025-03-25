@@ -4,6 +4,13 @@ A Model Context Protocol (MCP) server implementation of Atom of Thoughts, a deco
 
 > **Note**: This implementation is based on the research paper ["Atom of Thoughts for Markov LLM Test-Time Scaling"](https://arxiv.org/abs/2502.12018) (Teng et al., 2025).
 
+<a href="https://glama.ai/mcp/servers/@kbsooo/MCP_Atom_of_Thoughts">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@kbsooo/MCP_Atom_of_Thoughts/badge" />
+</a>
+
+[MCP.so](https://mcp.so/server/atom-of-thoughts/kbsooo)
+
+
 ## 한국어 설명
 
 ### Atom of Thoughts란?
