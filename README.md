@@ -109,6 +109,25 @@ Atom of Thoughts의 분해-수축 메커니즘과 자동 종료를 제어하는 
 5. **set_max_depth**: 최대 깊이 제한을 변경합니다.
    - 필요 매개변수: `maxDepth`
 
+### MCP 서버 설정 방법
+
+Atom of Thoughts MCP 서버를 사용하기 위해서는 Claude Desktop 또는 Cline의 MCP 설정에 서버를 등록해야 합니다. 다음은 서버 구성의 예시입니다:
+
+```json
+{ 
+  "mcpServers": { 
+    "atom-of-thoughts": { 
+      "command": "node", 
+      "args": ["/ABSOLUTE/PATH/TO/PARENT/FOLDER/atom-of-thoughts/build/index.js"], 
+      "disabled": false, 
+      "autoApprove": [] 
+    } 
+  } 
+}
+```
+
+위 설정에서 `/ABSOLUTE/PATH/TO/PARENT/FOLDER`는 실제 프로젝트가 위치한 절대 경로로 변경해주세요. 설정을 저장한 후 Claude Desktop 또는 Cline을 재시작하면 Atom of Thoughts MCP 서버를 사용할 수 있습니다.
+
 ## English Documentation
 
 This repository implements Atom of Thoughts (AoT), a decomposition-based reasoning framework, as a Model Context Protocol (MCP) server. This implementation is based on the concepts presented in the paper ["Atom of Thoughts for Markov LLM Test-Time Scaling"](https://arxiv.org/abs/2502.12018) (Teng et al., 2025).
@@ -211,5 +230,24 @@ A command tool to control the decomposition-contraction mechanism and automatic 
 4. **best_conclusion**: Get the verified conclusion with the highest confidence
 5. **set_max_depth**: Change the maximum depth limit
    - Required parameter: `maxDepth`
+
+### MCP Server Configuration
+
+To use the Atom of Thoughts MCP server, you need to register it in your Claude Desktop or Cline MCP settings. Here is an example configuration:
+
+```json
+{ 
+  "mcpServers": { 
+    "atom-of-thoughts": { 
+      "command": "node", 
+      "args": ["/ABSOLUTE/PATH/TO/PARENT/FOLDER/atom-of-thoughts/build/index.js"], 
+      "disabled": false, 
+      "autoApprove": [] 
+    } 
+  } 
+}
+```
+
+Replace `/ABSOLUTE/PATH/TO/PARENT/FOLDER` with the actual absolute path to the project on your system. After saving the configuration, restart Claude Desktop or Cline to use the Atom of Thoughts MCP server.
 
 For detailed implementation and code-level documentation, please refer to the source code in this repository.
