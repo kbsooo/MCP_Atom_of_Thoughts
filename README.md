@@ -10,6 +10,7 @@ A Model Context Protocol (MCP) server implementation of Atom of Thoughts, a deco
 
 [MCP.so](https://mcp.so/server/atom-of-thoughts/kbsooo)
 
+[한국어 설명](https://github.com/kbsooo/MCP_Atom_of_Thoughts?tab=readme-ov-file#%ED%95%9C%EA%B5%AD%EC%96%B4-%EC%84%A4%EB%AA%85)
 
 ## English Documentation
 
