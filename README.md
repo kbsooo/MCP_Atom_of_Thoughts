@@ -1,5 +1,6 @@
 # Atom of Thoughts (AoT)
 
+[![smithery badge](https://smithery.ai/badge/@kbsooo/mcp_atom_of_thoughts)](https://smithery.ai/server/@kbsooo/mcp_atom_of_thoughts)
 A Model Context Protocol (MCP) server implementation of Atom of Thoughts, a decomposition-based reasoning framework.
 
 > **Note**: This implementation is based on the research paper ["Atom of Thoughts for Markov LLM Test-Time Scaling"](https://arxiv.org/abs/2502.12018) (Teng et al., 2025).
@@ -169,6 +170,14 @@ A command tool to control the decomposition-contraction mechanism and automatic 
 4. **best_conclusion**: Get the verified conclusion with the highest confidence
 5. **set_max_depth**: Change the maximum depth limit
    - Required parameter: `maxDepth`
+
+### Installing via Smithery
+
+To install Atom of Thoughts for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@kbsooo/mcp_atom_of_thoughts):
+
+```bash
+npx -y @smithery/cli install @kbsooo/mcp_atom_of_thoughts --client claude
+```
 
 ### MCP Server Configuration
 
@@ -350,6 +359,14 @@ Atom of Thoughts의 분해-수축 메커니즘과 자동 종료를 제어하는 
 4. **best_conclusion**: 가장 높은 신뢰도의 검증된 결론을 가져옵니다.
 5. **set_max_depth**: 최대 깊이 제한을 변경합니다.
    - 필요 매개변수: `maxDepth`
+
+### Installing via Smithery
+
+To install Atom of Thoughts for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@kbsooo/mcp_atom_of_thoughts):
+
+```bash
+npx -y @smithery/cli install @kbsooo/mcp_atom_of_thoughts --client claude
+```
 
 ### MCP 서버 설정 방법
 
