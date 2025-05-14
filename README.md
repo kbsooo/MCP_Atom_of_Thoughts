@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/kbsooo-mcp-atom-of-thoughts-badge.png)](https://mseep.ai/app/kbsooo-mcp-atom-of-thoughts)
+
 # Atom of Thoughts (AoT)
 
 [![smithery badge](https://smithery.ai/badge/@kbsooo/mcp_atom_of_thoughts)](https://smithery.ai/server/@kbsooo/mcp_atom_of_thoughts)
